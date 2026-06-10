@@ -1,13 +1,12 @@
 # Quickstart — a 1:1 stablecoin swap interface (Next.js + @lifi/intent)
 
-A minimal, runnable interface that quotes 1:1, opens an escrow order, and tracks it to delivered,
-using the `@lifi/intent` SDK (quote + order build) with `viem`/`wagmi` for the wallet and the
-`open` call. The quote/build flows here are verified against the production solver network.
+A minimal, runnable interface that quotes 1:1, approves, opens an escrow order, and tracks it to
+delivered, using the `@lifi/intent` SDK (quote + order build) with `wagmi`/`viem` for the wallet.
 
 > Prerequisite: a LI.FI integrator account with 1:1 stablecoin quoting enabled (register at
 > https://portal.li.fi). Without it, the same code returns standard market quotes.
 
-## 1. Scaffold & install
+## 1. Scaffold, install, set target
 
 ```bash
 npx create-next-app@latest lifi-1to1-swap --ts --app --no-tailwind
@@ -20,9 +19,18 @@ npm install @lifi/intent viem wagmi @tanstack/react-query
 NEXT_PUBLIC_LIFI_INTEGRATOR_KEY=your-onboarded-integrator-key
 ```
 
-## 2. The `open` ABI — `lib/abi.ts`
+The SDK uses `bigint` literals, so set the TS target to ES2020+ (create-next-app defaults to
+ES2017, which rejects them):
 
-The escrow `open(StandardOrder)` ABI (the SDK builds the `order` value you pass to it):
+```jsonc
+// tsconfig.json
+{ "compilerOptions": { "target": "ES2020" /* ...the rest unchanged... */ } }
+```
+
+## 2. ABIs — `lib/abi.ts`
+
+The escrow `open(StandardOrder)` ABI (the SDK builds the `order` value you pass to it), plus a
+minimal ERC-20 ABI for the allowance check + approve:
 
 ```ts
 export const OPEN_ABI = [
@@ -41,26 +49,73 @@ export const OPEN_ABI = [
         {
           name: "outputs", type: "tuple[]",
           components: [
-            { name: "oracle", type: "bytes32" },
-            { name: "settler", type: "bytes32" },
-            { name: "chainId", type: "uint256" },
-            { name: "token", type: "bytes32" },
-            { name: "amount", type: "uint256" },
-            { name: "recipient", type: "bytes32" },
-            { name: "callbackData", type: "bytes" },
-            { name: "context", type: "bytes" },
+            { name: "oracle", type: "bytes32" }, { name: "settler", type: "bytes32" },
+            { name: "chainId", type: "uint256" }, { name: "token", type: "bytes32" },
+            { name: "amount", type: "uint256" }, { name: "recipient", type: "bytes32" },
+            { name: "callbackData", type: "bytes" }, { name: "context", type: "bytes" },
           ],
         },
       ],
     }],
   },
 ] as const;
+
+export const ERC20_ABI = [
+  { type: "function", name: "approve", stateMutability: "nonpayable",
+    inputs: [{ name: "spender", type: "address" }, { name: "amount", type: "uint256" }],
+    outputs: [{ name: "", type: "bool" }] },
+  { type: "function", name: "allowance", stateMutability: "view",
+    inputs: [{ name: "owner", type: "address" }, { name: "spender", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }] },
+] as const;
 ```
 
-## 3. Swap logic — `lib/swap.ts`
+## 3. Wallet config — `lib/wagmi.ts` + `app/providers.tsx`
+
+The wallet hooks need a wagmi config and providers:
 
 ```ts
-import { IntentApi, Intent, type IntentDeps } from "@lifi/intent";
+// lib/wagmi.ts
+import { createConfig, http } from "wagmi";
+import { arbitrum, base } from "wagmi/chains";
+import { injected } from "wagmi/connectors";
+
+export const wagmiConfig = createConfig({
+  chains: [base, arbitrum],
+  connectors: [injected()],
+  transports: { [base.id]: http(), [arbitrum.id]: http() },
+});
+
+declare module "wagmi" {
+  interface Register { config: typeof wagmiConfig; }
+}
+```
+
+```tsx
+// app/providers.tsx
+"use client";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useState } from "react";
+import { WagmiProvider } from "wagmi";
+import { wagmiConfig } from "../lib/wagmi";
+
+export function Providers({ children }: { children: React.ReactNode }) {
+  const [queryClient] = useState(() => new QueryClient());
+  return (
+    <WagmiProvider config={wagmiConfig}>
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    </WagmiProvider>
+  );
+}
+```
+
+Wrap the app in `app/layout.tsx`: `import { Providers }` and render `<Providers>{children}</Providers>`
+inside `<body>`.
+
+## 4. Swap logic — `lib/swap.ts`
+
+```ts
+import { IntentApi, Intent, type IntentDeps, type StandardEVM } from "@lifi/intent";
 import type { WalletClient } from "viem";
 import { OPEN_ABI } from "./abi";
 
@@ -108,15 +163,18 @@ export async function openSwap(
     lock: { type: "escrow" },
   }, deps).order();
 
-  const order   = intent.asOrder();
+  // asOrder() is a union; narrow to the single-chain EVM order for the OPEN_ABI tuple.
+  const order = intent.asOrder() as StandardEVM;
   const orderId = intent.orderId();
 
-  // Approve the source token to `intent.inputSettler` first if allowance is insufficient.
+  // writeContract needs `account` + `chain` when the wallet client has none bound.
   const txHash = await wallet.writeContract({
     address: intent.inputSettler, // InputSettlerEscrow (SDK-provided)
     abi: OPEN_ABI,
     functionName: "open",
     args: [order],
+    account: user,
+    chain: wallet.chain,
   });
   return { txHash, orderId };
 }
@@ -130,35 +188,52 @@ export async function trackOrder(orderId: string) {
 }
 ```
 
-## 4. Interface — `app/page.tsx`
+## 5. Interface — `app/page.tsx`
+
+Quote, approve-if-needed, open, then poll status. The approve uses the ERC-20 ABI from §2 and a
+public client for the allowance read.
 
 ```tsx
 "use client";
 import { useState } from "react";
-import { useAccount, useConnect, useWalletClient } from "wagmi";
+import { useAccount, useConnect, useWalletClient, usePublicClient } from "wagmi";
 import { getQuote, openSwap, trackOrder, type Tok } from "../lib/swap";
+import { ERC20_ABI } from "../lib/abi";
 
-const USDC_BASE: Tok = { name: "usdc", address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", chainId: 8453,  decimals: 6 };
-const USDC_ARB:  Tok = { name: "usdc", address: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", chainId: 42161, decimals: 6 };
+const USDC_BASE: Tok = { name:"usdc", address:"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", chainId:8453,  decimals:6 };
+const USDC_ARB:  Tok = { name:"usdc", address:"0xaf88d065e77c8cC2239327C5EDb3A432268e5831", chainId:42161, decimals:6 };
+const SETTLER = "0x000025c3226C00B2Cdc200005a1600509f4e00C0" as const; // InputSettlerEscrow
+const AMOUNT_IN = 100_000_000n; // 100 USDC (6 decimals)
 
 export default function Page() {
   const { address, isConnected } = useAccount();
   const { connect, connectors } = useConnect();
   const { data: wallet } = useWalletClient();
+  const publicClient = usePublicClient({ chainId: 8453 }); // Base — a literal configured chain id
   const [out, setOut] = useState<bigint>();
   const [status, setStatus] = useState("");
 
-  const amountIn = 100_000_000n; // 100 USDC (6 decimals)
-
-  async function quote() { setOut(await getQuote(USDC_BASE, USDC_ARB, amountIn, address!)); }
+  async function quote() { setOut(await getQuote(USDC_BASE, USDC_ARB, AMOUNT_IN, address!)); }
 
   async function swap() {
-    const { orderId } = await openSwap(USDC_BASE, USDC_ARB, amountIn, out!, address!, wallet!);
+    if (!wallet || out === undefined) return;
+    // approve InputSettlerEscrow if allowance is insufficient
+    const allowance = await publicClient!.readContract({
+      address: USDC_BASE.address, abi: ERC20_ABI, functionName: "allowance", args: [address!, SETTLER],
+    });
+    if (allowance < AMOUNT_IN) {
+      await wallet.writeContract({
+        address: USDC_BASE.address, abi: ERC20_ABI, functionName: "approve",
+        args: [SETTLER, AMOUNT_IN], account: address!, chain: wallet.chain,
+      });
+    }
+    const { orderId } = await openSwap(USDC_BASE, USDC_ARB, AMOUNT_IN, out, address!, wallet);
     setStatus("Submitted...");
     const timer = setInterval(async () => {
       const s = await trackOrder(orderId);
-      setStatus(s.meta?.orderStatus ?? "pending");
-      if (["Delivered", "Settled", "Expired"].includes(s.meta?.orderStatus)) clearInterval(timer);
+      const st: string = s?.meta?.orderStatus ?? "pending";
+      setStatus(st);
+      if (["Delivered", "Settled", "Expired"].includes(st)) clearInterval(timer);
     }, 3000);
   }
 
@@ -166,28 +241,25 @@ export default function Page() {
     return <button onClick={() => connect({ connector: connectors[0] })}>Connect wallet</button>;
 
   return (
-    <main style={{ maxWidth: 420, margin: "4rem auto", fontFamily: "sans-serif" }}>
-      <h1>Send 100 USDC (Base) → receive {out ? Number(out) / 1e6 : "—"} USDC (Arbitrum)</h1>
+    <main style={{ maxWidth: 460, margin: "4rem auto", fontFamily: "sans-serif" }}>
+      <h1>Send 100 USDC (Base) → receive {out !== undefined ? Number(out) / 1e6 : "—"} USDC (Arbitrum)</h1>
       <button onClick={quote}>Get 1:1 quote</button>
-      <button onClick={swap} disabled={!out}>Swap</button>
+      <button onClick={swap} disabled={out === undefined}>Swap</button>
       <p>{status}</p>
     </main>
   );
 }
 ```
 
-(Wrap the app in `WagmiProvider` + `QueryClientProvider` in `app/layout.tsx` per the wagmi docs.
-Add an ERC-20 `approve(intent.inputSettler, amountIn)` before `open` if allowance is insufficient.)
-
-## 5. Run
+## 6. Run
 
 ```bash
 npm run dev
 ```
 
 Click **Get 1:1 quote** — under a 1:1-enabled integrator you'll see "receive 100 USDC". Click
-**Swap**, sign once, and the status flips Submitted → Delivered → Settled as the solver fills on
-Arbitrum. The `orderId` is the on-chain receipt anyone can verify on a block explorer.
+**Swap**, approve + sign, and the status flips Submitted → Delivered → Settled as the solver fills
+on Arbitrum. The `orderId` is the on-chain receipt anyone can verify on a block explorer.
 
 ## Notes
 

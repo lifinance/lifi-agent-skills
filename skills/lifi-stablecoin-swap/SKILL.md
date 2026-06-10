@@ -73,6 +73,12 @@ each order off-chain. Use escrow unless you specifically want gasless after a on
 npm install @lifi/intent viem
 ```
 
+(The runnable interface in the quickstart also uses `wagmi` + `@tanstack/react-query` for the
+wallet — its install line includes them.)
+
+> Setup note: the SDK uses `bigint` literals (`100_000_000n`). `create-next-app` defaults
+> `tsconfig.json` to `"target": "ES2017"`, which rejects them — set `"target": "ES2020"` (or higher).
+
 ---
 
 ## 3. Quote (1:1)
@@ -100,8 +106,6 @@ const received = BigInt(quote.preview.outputs[0].amount); // == 100_000_000n for
 const quoteId = quote.quoteId;
 ```
 
-(Verified: USDC Base → USDC Arbitrum returns `received === 100_000_000n` under a 1:1 integrator.)
-
 ---
 
 ## 4. Build & open the order
@@ -111,7 +115,7 @@ the nonce, deadlines, oracle, and EIP-7930 encoding. `getOracle` supplies the ve
 (Polymer addresses below). Then call `open(order)` on the escrow settler the SDK gives you.
 
 ```ts
-import { Intent, type IntentDeps } from "@lifi/intent";
+import { Intent, type IntentDeps, type StandardEVM } from "@lifi/intent";
 import type { WalletClient } from "viem";
 
 const POLYMER_ORACLE = "0x0000003E06000007A224AeE90052fA6bb46d43C9" as const; // mainnet
@@ -135,20 +139,21 @@ const intent = new Intent({
   lock: { type: "escrow" },
 }, deps).order();
 
-const order   = intent.asOrder();      // the StandardOrder struct
-const orderId = intent.orderId();      // your tracking handle
-const settler = intent.inputSettler;   // InputSettlerEscrow (0x000025c3...)
+// asOrder() is a union (multichain | EVM | Solana); narrow to the single-chain EVM order
+// so it matches the OPEN_ABI StandardOrder tuple.
+const order   = intent.asOrder() as StandardEVM; // the StandardOrder struct
+const orderId = intent.orderId();                // your tracking handle
+const settler = intent.inputSettler;             // InputSettlerEscrow (0x000025c3...)
 
-// 1) ERC-20 approve(settler, amountIn) for the source token if allowance is insufficient.
-// 2) Open the order (full `open` ABI is in references/quickstart.md):
+// 1) ERC-20 approve(settler, amountIn) for the source token if allowance is insufficient
+//    (allowance check + ERC20 ABI shown in references/quickstart.md).
+// 2) Open the order (full `open` ABI is in references/quickstart.md). viem's writeContract
+//    needs `account` and `chain` when the wallet client has none bound:
 const txHash = await wallet.writeContract({
   address: settler, abi: OPEN_ABI, functionName: "open", args: [order],
+  account: user, chain: wallet.chain,
 });
 ```
-
-(Verified: the SDK produces `inputSettler = 0x000025c3226C00B2Cdc200005a1600509f4e00C0` and an
-`outputs[0].settler` of `0x0000000000eC36B683C2E6AC89e9A75989C22a2e`, matching the deployed
-contracts below.)
 
 ---
 
@@ -188,7 +193,8 @@ A clean 1:1 swap UI has three states. Keep gas, spreads, and solver mechanics of
    verifiable receipt. Offer "swap again".
 
 A complete, runnable React / Next.js interface is in
-[`references/quickstart.md`](references/quickstart.md) (incl. the full `open` ABI).
+[`references/quickstart.md`](references/quickstart.md) — including the full `open` ABI, the ERC-20
+approve/allowance step, and the wagmi `createConfig` + provider wiring the wallet hooks need.
 
 ---
 
