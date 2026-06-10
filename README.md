@@ -24,6 +24,17 @@ Complete reference for LI.FI's APIs across the full product surface:
 
 **Use when:** building backends, bots, AI agents, or apps in any language that need cross-chain or DeFi functionality over HTTP. (For TypeScript frontends, the API works too — or see LI.FI's `@lifi/sdk` and Widget.)
 
+### lifi-stablecoin-swap
+
+Focused, end-to-end recipe for building a **1:1 stablecoin swap** with LI.FI Intents — where the amount the user sends equals the amount they receive (no visible gas or solver fees), same-chain or cross-chain, filled by the solver network and verifiable on-chain:
+
+- **1:1 enablement** — how the LI.FI integrator ID / Partner Portal provisions 1:1 stablecoin quoting
+- **Quote → approve → escrow open → status** — the full Intents escrow flow for stablecoins
+- **EIP-7930 addresses, `StandardOrder`, order lifecycle** — everything needed to build and track an order to settlement
+- **TypeScript SDK + REST** — `@lifi/intent` for TS apps (incl. a runnable Next.js quickstart) and the raw `order.li.fi` endpoints for any language
+
+**Use when:** building a 1:1 stablecoin swap interface or backend — e.g. for a neobank, payment processor, or regulated fintech.
+
 ## What is LI.FI?
 
 LI.FI is a multi-chain liquidity aggregation protocol that provides:
