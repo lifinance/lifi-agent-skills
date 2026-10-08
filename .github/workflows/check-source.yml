@@ -1,0 +1,26 @@
+name: Check canonical skill source
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check-source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Test source consistency check
+        run: node --test scripts/check-source.test.mjs
+      - name: Generate source catalog
+        run: node scripts/check-source.mjs --commit "$GITHUB_SHA" > skill-source.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: skill-source
+          path: skill-source.json
