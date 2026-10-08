@@ -19,11 +19,10 @@ To review a reproducible snapshot, use a full commit obtained from the canonical
 git clone https://github.com/lifinance/lifi-agent-skills.git
 cd lifi-agent-skills
 git checkout --detach COMMIT
-git rev-parse HEAD
-node scripts/check-source.mjs --commit "$(git rev-parse HEAD)"
+node scripts/check-source.mjs --commit COMMIT
 ```
 
-Only the `skills/` directory and references at that commit are the reviewed source. The quick installation command in the README is not a pinned installation contract: check the installer and installed files separately. A Git commit and file hashes identify content; they do not establish signer identity or attest that API calls were tested.
+The check fails unless the clean checkout's `HEAD` is exactly `COMMIT`. Only the `skills/` directory and references at that commit are the reviewed source. The quick installation command in the README is not a pinned installation contract: check the installer and installed files separately. A Git commit and file hashes identify content; they do not establish signer identity or attest that API calls were tested.
 
 ## Distribution map
 
@@ -32,21 +31,21 @@ Only the `skills/` directory and references at that commit are the reviewed sour
 | This repository | Canonical company-owned source | Official docs and installation examples point here |
 | Official agent documentation | Company-owned entry point | Names both current skills and links to this source/version policy |
 | skills.sh | Third-party discovery index | Current entries should resolve to this repository; historical `li-fi-api` / `li-fi-sdk` entries are superseded by `lifi`, not additional current skills |
-| `lifinance/clawhub-skill` | Separate company-owned legacy source, not this repository | Needs a separate maintainer decision to retire or align; do not treat it as an equivalent current distribution |
-| ClawHub `rhlsthrm/lifi-crosschain` | Personal namespace; company ownership is not established | Not an official installation source; ownership/content alignment needs separate authorization |
-| Playbooks `openclaw/skills/lifi-crosschain` | Third-party mirror, not this repository | Not an official installation source; availability and content may change |
+| `lifinance/clawhub-skill` | Separate repository under the company GitHub organization, not this repository | Needs a separate maintainer decision to retire or align; do not treat it as an equivalent current distribution |
+| ClawHub `rhlsthrm/lifi-crosschain` | Listing outside this repository; ownership not verified by this policy | Not an official installation source; ownership/content alignment needs separate authorization |
+| Playbooks `openclaw/skills/lifi-crosschain` | Listing outside this repository; ownership not verified by this policy | Not an official installation source; availability and content may change |
 
 This policy does not change, publish, delete, or transfer any third-party entry. Directory listings may lag repository renames. Match the source repository, commit, skill name, and complete file contents rather than trusting a listing title or installation count.
 
 ## Local consistency and metadata
 
-Run `node scripts/check-source.mjs --commit FULL_COMMIT`. The dependency-free check validates the current skill set, frontmatter names/descriptions, local Markdown reference links, and canonical README installation source. It writes a JSON catalog to stdout containing:
+Run `node scripts/check-source.mjs --commit FULL_COMMIT` from the root of a Git checkout (Node.js and `git` required, no other dependencies). The check fails unless `HEAD` equals `FULL_COMMIT` and `README.md`, `PROVENANCE.md`, `skills/` and `scripts/` have no modified, untracked, or ignored files. It validates the current skill set, frontmatter names/descriptions, regular files only (no symlinks), local Markdown links that resolve to files inside the same skill directory, and canonical README installation source. It writes a JSON catalog to stdout containing:
 
 - `source`: canonical repository URL;
-- `commit`: the supplied full Git commit (the caller must bind it to the checkout);
+- `commit`: the verified checked-out full Git commit;
 - `skills[].name`: validated frontmatter/directory name;
 - `skills[].files[]`: repository-relative path and SHA-256 of each skill file, including references.
 
-CI binds `commit` to the checked-out `github.sha` and uploads the generated catalog as a review artifact. It is not a release, registry publication, signature, or live API/registry test. For a dirty local checkout, hashes describe working files rather than necessarily the supplied commit; use a clean checkout for provenance comparisons.
+CI runs the checker tests, then generates the catalog for the pushed commit or, for pull requests, the PR head commit (not GitHub's temporary merge commit), and uploads it as a review artifact. It is not a release, registry publication, signature, or live API/registry test. The commit is the content identifier; the catalog does not prove who published an installed copy.
 
 If maintainers later define a release format, use this same source check/catalog at the approved release commit rather than hand-copying skill names or capability counts into registry metadata. Signing, release versioning, registry ownership and publication credentials remain separate decisions. External index comparisons should be read-only and performed separately; network availability must not block this local consistency check.

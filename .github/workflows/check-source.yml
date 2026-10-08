@@ -11,16 +11,23 @@ permissions:
 jobs:
   check-source:
     runs-on: ubuntu-latest
+    env:
+      # Attribute pull request catalogs to the PR head commit, not GitHub's temporary merge commit.
+      SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_COMMIT }}
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
       - name: Test source consistency check
         run: node --test scripts/check-source.test.mjs
       - name: Generate source catalog
-        run: node scripts/check-source.mjs --commit "$GITHUB_SHA" > skill-source.json
+        run: node scripts/check-source.mjs --commit "$SOURCE_COMMIT" > "$RUNNER_TEMP/skill-source.json"
       - uses: actions/upload-artifact@v4
         with:
           name: skill-source
-          path: skill-source.json
+          path: ${{ runner.temp }}/skill-source.json
+          if-no-files-found: error
