@@ -10,9 +10,7 @@ npx skills add lifinance/lifi-agent-skills
 
 ## Source and version
 
-The canonical source is [lifinance/lifi-agent-skills](https://github.com/lifinance/lifi-agent-skills). The default installation follows the current repository content; record the full Git commit when reviewing or installing a snapshot. The current skill names are `lifi` and `lifi-stablecoin-swap`; historical `li-fi-api` and `li-fi-sdk` entries are not separate current skills.
-
-There are no tagged releases or independent skill versions today. A repository commit identifies the version of both skills and their references. It is not a package signature or proof of API compatibility. See [Provenance and distribution](PROVENANCE.md) for source verification, local checks, and third-party directory policy.
+This repository is the canonical source. The current skills are `lifi` and `lifi-stablecoin-swap`. There are no tagged releases; the Git commit is the version.
 
 ## Available Skills
 
