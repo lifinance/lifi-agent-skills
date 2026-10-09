@@ -5,8 +5,12 @@ Agent Skill for integrating [LI.FI](https://li.fi/) into your applications. Teac
 ## Installation
 
 ```bash
-npx skills add <owner>/lifi-agent-skills
+npx skills add lifinance/lifi-agent-skills
 ```
+
+## Source and version
+
+This repository is the canonical source. The current skills are `lifi` and `lifi-stablecoin-swap`. There are no tagged releases; the Git commit is the version.
 
 ## Available Skills
 
