@@ -74,6 +74,19 @@ curl "https://li.quest/v1/status?txHash=0xYourTxHash&fromChain=42161&toChain=10&
 
 From the quote response, extract: `transactionRequest` (sign & send), `estimate.approvalAddress` (ERC-20 spender), `estimate.toAmount`/`toAmountMin`, `estimate.executionDuration` (basis for polling), and `tool` (pass as `bridge` to `/status`). Quotes go stale in ~60 seconds — re-fetch before signing if older (and always after a separate approval tx).
 
+## Speed vs. Cost — Let the User Choose
+
+Without `order`, `/quote` optimizes for cost and can return a slow bridge. Example (2 USDC Base → Arbitrum, Nov 2026): the default route was `polymerStandard` with `executionDuration` 1080 s (~18 min), while `order=FASTEST` returned an intent bridge with ~2 s ETA for about $0.01–0.03 less received. Agents that execute the first quote silently pick the slow route.
+
+For every **cross-chain** transfer:
+
+1. Before asking the user to sign, show the estimated time (`estimate.executionDuration`, in seconds), the amount received (`estimate.toAmount` / `toAmountUSD`) and fees (`feeCosts` + `gasCosts`).
+2. If the user stated a preference, pass it: `order=FASTEST` for speed, `order=CHEAPEST` for the best amount.
+3. If they did not, and the ETA is above ~5 minutes, fetch a second quote with `order=FASTEST` and present both side by side (time vs. received amount vs. fees). Let the user pick; do not choose the slow route silently.
+4. Use `/advanced/routes` instead when you need more than two options — each step's `estimate.executionDuration` lets you rank them by time.
+
+Same-chain swaps are atomic, so this check only applies across chains.
+
 ## Core Endpoints
 
 ### GET /quote
@@ -88,7 +101,7 @@ Single best route with transaction data ready for execution.
 | `fromAddress` | string | Yes | Sender wallet address |
 | `toAddress` | string | No | Recipient (defaults to fromAddress) |
 | `slippage` | number | No | 0.005 = 0.5% (default) |
-| `order` | string | No | `FASTEST` or `CHEAPEST` |
+| `order` | string | No | `FASTEST` or `CHEAPEST` (omitted = cost-optimized; see [Speed vs. Cost](#speed-vs-cost--let-the-user-choose)) |
 | `integrator` | string | No | Your app ID (analytics + fee collection) |
 | `fee` | number | No | Integrator fee (0.02 = 2%) |
 | `preset` | string | No | Routing preset, e.g. `stablecoin` (see below) |
@@ -319,6 +332,7 @@ const quote = await getQuote({
 6. **Request `chainTypes` explicitly on `/chains`** if you need non-EVM (default is EVM-only).
 7. **Amounts are strings** in smallest units (`human × 10^decimals`); `transactionRequest.value/gasLimit/gasPrice` are hex strings.
 8. **Handle `PARTIAL` completions** — offer a same-chain recovery swap when worthwhile.
-9. **For agents:** consider the MCP server (`https://mcp.li.quest/mcp`) or `@lifi/cli` for token-efficient access; machine-readable docs at `https://docs.li.fi/llms.txt` and `https://docs.li.fi/openapi.yaml` (any docs page is fetchable as markdown by appending `.md`).
+9. **Show ETA before cross-chain execution** — if the default quote is slow, compare it with `order=FASTEST` and let the user choose (see [Speed vs. Cost](#speed-vs-cost--let-the-user-choose)).
+10. **For agents:** consider the MCP server (`https://mcp.li.quest/mcp`) or `@lifi/cli` for token-efficient access; machine-readable docs at `https://docs.li.fi/llms.txt` and `https://docs.li.fi/openapi.yaml` (any docs page is fetchable as markdown by appending `.md`).
 
 See [references/REFERENCE.md](references/REFERENCE.md) for complete endpoint documentation, response schemas, the Earn and Intents API references, error codes, chain IDs, and token addresses.
